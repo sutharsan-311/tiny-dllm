@@ -17,6 +17,8 @@ non-sequential generation.
 
 ## Files
 
+### Core (learn step by step)
+
 | File | What you learn |
 |---|---|
 | `01_tensors.py` | PyTorch tensors, autograd, nn.Module, training loop |
@@ -25,6 +27,14 @@ non-sequential generation.
 | `04_diffusion.py` | Masked diffusion — forward noise + denoising sampler |
 | `05_train.py` | Train on TinyShakespeare |
 | `06_generate.py` | Generate text from a trained checkpoint |
+
+### Tamil (classical language experiment)
+
+| File | What it does |
+|---|---|
+| `tamil_dataset.py` | Downloads Thirukkural (1330 couplets) + Sangam poetry |
+| `08_train_tamil.py` | Trains dLLM on Tamil Unicode text with Tamil-aware tokenizer |
+| `09_generate_tamil.py` | Generates classical Tamil-style text from trained checkpoint |
 
 ## Setup
 
@@ -43,12 +53,26 @@ python 02_attention.py
 python 03_transformer.py
 python 04_diffusion.py
 
-# Train (~15-30 mins on RTX 3050, downloads Shakespeare automatically)
+# Train on Shakespeare (~15-30 mins on RTX 3050, downloads automatically)
 python 05_train.py
 
-# Generate — no input needed, model generates on its own
+# Generate English — no input needed, model generates on its own
 python 06_generate.py
 python 06_generate.py --steps 30 --len 200 --temp 0.8
+```
+
+### Tamil
+
+```bash
+# Download Thirukkural (1330 couplets) + Sangam poetry
+python tamil_dataset.py
+
+# Train on Tamil (~15-30 mins on RTX 3050)
+python 08_train_tamil.py
+
+# Generate classical Tamil text
+python 09_generate_tamil.py
+python 09_generate_tamil.py --steps 30 --len 100
 ```
 
 ## Model Architecture
@@ -73,6 +97,9 @@ Logits [B, T, vocab_size]
 - [x] Transformer backbone
 - [x] Masked diffusion training
 - [x] Iterative confidence-based sampling
+- [x] Tamil Unicode tokenizer
+- [x] Train on Thirukkural + Sangam poetry
 - [ ] Fill-in-the-blanks (conditional generation)
+- [ ] Larger Tamil dataset (Tamil Wikipedia, AI4Bharat)
 - [ ] Fine-tune on robot task sequences (ROS2 action plans)
-- [ ] Conditional generation (robot state → action plan)
+- [ ] Tamil robot commands → action plan generation
