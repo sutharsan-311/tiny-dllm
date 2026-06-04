@@ -33,6 +33,7 @@ non-sequential generation.
 | File | What it does |
 |---|---|
 | `tamil_dataset.py` | Downloads Thirukkural (1330 couplets) + Sangam poetry |
+| `tamil_wikipedia.py` | Downloads Tamil Wikipedia — API mode (~10MB) or full dump (~2GB) |
 | `08_train_tamil.py` | Trains dLLM on Tamil Unicode text with Tamil-aware tokenizer |
 | `09_generate_tamil.py` | Generates classical Tamil-style text from trained checkpoint |
 
@@ -64,16 +65,28 @@ python 06_generate.py --steps 30 --len 200 --temp 0.8
 ### Tamil
 
 ```bash
-# Download Thirukkural (1330 couplets) + Sangam poetry
+# Step 1 — Download Thirukkural (1330 couplets) + Sangam poetry
 python tamil_dataset.py
 
-# Train on Tamil (~15-30 mins on RTX 3050)
+# Step 2 — Add Tamil Wikipedia (optional but recommended)
+python tamil_wikipedia.py --api              # 200 articles ~10MB, easy
+python tamil_wikipedia.py --api --limit 500  # 500 articles ~25MB
+pip install wikiextractor
+python tamil_wikipedia.py --dump             # full Wikipedia ~2GB, serious training
+
+# Step 3 — Train on Tamil (~15-30 mins on RTX 3050)
 python 08_train_tamil.py
 
-# Generate classical Tamil text
+# Step 4 — Generate classical Tamil text
 python 09_generate_tamil.py
 python 09_generate_tamil.py --steps 30 --len 100
 ```
+
+| Dataset | Size | Model quality |
+|---|---|---|
+| Thirukkural only | ~50K chars | Classical patterns |
+| + Wikipedia API (200 articles) | ~10MB | Modern Tamil words |
+| + Full Wikipedia dump | ~2GB | Fluent Tamil generation |
 
 ## Model Architecture
 
@@ -99,7 +112,8 @@ Logits [B, T, vocab_size]
 - [x] Iterative confidence-based sampling
 - [x] Tamil Unicode tokenizer
 - [x] Train on Thirukkural + Sangam poetry
+- [x] Tamil Wikipedia downloader (API + full dump)
 - [ ] Fill-in-the-blanks (conditional generation)
-- [ ] Larger Tamil dataset (Tamil Wikipedia, AI4Bharat)
+- [ ] AI4Bharat Tamil dataset integration
 - [ ] Fine-tune on robot task sequences (ROS2 action plans)
 - [ ] Tamil robot commands → action plan generation
