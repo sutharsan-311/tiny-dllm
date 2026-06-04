@@ -1,13 +1,16 @@
 """
-Phase 4: Train on TinyShakespeare
------------------------------------
-Downloads Shakespeare text, builds a character-level vocab,
-and trains the dLLM to denoise masked sequences.
+Phase 6: Train a tiny GPT on TinyShakespeare
+---------------------------------------------
+Same architecture, same data, same steps as 05_train.py (dLLM).
+The only differences vs the dLLM:
+  1. Causal mask in attention — each token only sees past tokens
+  2. Loss is next-token prediction, not masked denoising
+  3. No mask token needed
 
-  python 05_train.py
+Run:
+  python 07_train_gpt.py
 
-Checkpoints saved to checkpoints/dllm.pt every 500 steps.
-Training ~1-2 hrs on RTX 3050 for 5000 steps.
+Checkpoints saved to checkpoints/gpt_step<N>.pt every 1000 steps.
 """
 
 import os
@@ -61,148 +64,122 @@ class CharTokenizer:
         return obj
 
 
-# ── Model (same as 04) ────────────────────────────────────────────────────────
-class SelfAttention(nn.Module):
-    def __init__(self, hidden, n_heads):
+# ── Model ─────────────────────────────────────────────────────────────────────
+class CausalSelfAttention(nn.Module):
+    def __init__(self, hidden, n_heads, max_seq):
         super().__init__()
         self.n_heads  = n_heads
         self.head_dim = hidden // n_heads
         self.qkv = nn.Linear(hidden, 3 * hidden, bias=False)
         self.out  = nn.Linear(hidden, hidden, bias=False)
+        # causal mask — lower triangle of 1s, upper triangle blocked
+        self.register_buffer('mask', torch.tril(torch.ones(max_seq, max_seq)))
+
     def forward(self, x):
         B, T, C = x.shape
         q, k, v = self.qkv(x).chunk(3, dim=-1)
-        def split(t): return t.view(B,T,self.n_heads,self.head_dim).transpose(1,2)
+        def split(t): return t.view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
         q, k, v = split(q), split(k), split(v)
-        scores = (q @ k.transpose(-2,-1)) / math.sqrt(self.head_dim)
-        out = (F.softmax(scores,-1) @ v).transpose(1,2).contiguous().view(B,T,C)
+        scores = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
+        scores = scores.masked_fill(self.mask[:T, :T] == 0, float('-inf'))
+        out = (F.softmax(scores, dim=-1) @ v).transpose(1, 2).contiguous().view(B, T, C)
         return self.out(out)
 
 class FeedForward(nn.Module):
     def __init__(self, hidden):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(hidden, 4*hidden), nn.GELU(), nn.Linear(4*hidden, hidden))
+            nn.Linear(hidden, 4 * hidden), nn.GELU(), nn.Linear(4 * hidden, hidden))
     def forward(self, x): return self.net(x)
 
 class TransformerBlock(nn.Module):
-    def __init__(self, hidden, n_heads):
+    def __init__(self, hidden, n_heads, max_seq):
         super().__init__()
         self.norm1 = nn.LayerNorm(hidden)
-        self.attn  = SelfAttention(hidden, n_heads)
+        self.attn  = CausalSelfAttention(hidden, n_heads, max_seq)
         self.norm2 = nn.LayerNorm(hidden)
         self.ff    = FeedForward(hidden)
     def forward(self, x):
         return x + self.ff(self.norm2(x + self.attn(self.norm1(x))))
 
-class TinyDLLM(nn.Module):
-    def __init__(self, vocab_size, hidden=256, n_layers=4, n_heads=4, max_seq=128):
+class TinyGPT(nn.Module):
+    def __init__(self, vocab_size, hidden=384, n_layers=6, n_heads=6, max_seq=128):
         super().__init__()
-        self.mask_token_id = vocab_size
-        full_vocab = vocab_size + 1
-        self.token_emb = nn.Embedding(full_vocab, hidden)
+        self.token_emb = nn.Embedding(vocab_size, hidden)
         self.pos_emb   = nn.Embedding(max_seq, hidden)
-        self.blocks    = nn.Sequential(*[TransformerBlock(hidden, n_heads) for _ in range(n_layers)])
-        self.norm = nn.LayerNorm(hidden)
-        self.head = nn.Linear(hidden, vocab_size, bias=False)
-        self.head.weight = nn.Parameter(self.token_emb.weight[:vocab_size])
+        self.blocks    = nn.Sequential(*[TransformerBlock(hidden, n_heads, max_seq) for _ in range(n_layers)])
+        self.norm      = nn.LayerNorm(hidden)
+        self.head      = nn.Linear(hidden, vocab_size, bias=False)
+        self.head.weight = self.token_emb.weight  # weight tying
         for m in self.modules():
             if isinstance(m, (nn.Linear, nn.Embedding)):
                 nn.init.normal_(m.weight, std=0.02)
+
     def forward(self, token_ids):
         B, T = token_ids.shape
         pos = torch.arange(T, device=token_ids.device)
         x = self.token_emb(token_ids) + self.pos_emb(pos)
         return self.head(self.norm(self.blocks(x)))
 
-
-# ── Diffusion ─────────────────────────────────────────────────────────────────
-class MaskedDiffusion:
-    def __init__(self, mask_token_id):
-        self.mask_id = mask_token_id
-
-    def loss(self, model, tokens):
-        B, T = tokens.shape
-        t = torch.rand(B, device=tokens.device)
-        mask_prob = t.unsqueeze(1).expand(B, T)
-        mask = torch.bernoulli(mask_prob).bool()
-        noisy = tokens.clone()
-        noisy[mask] = self.mask_id
-        logits = model(noisy)
-        logits_masked = logits[mask]
-        targets = tokens[mask]
-        if logits_masked.numel() == 0:
-            return torch.tensor(0.0, device=tokens.device)
-        return F.cross_entropy(logits_masked, targets)
-
     @torch.no_grad()
-    def sample(self, model, seq_len, n_steps=20, device='cpu'):
-        model.eval()
-        tokens = torch.full((1, seq_len), self.mask_id, dtype=torch.long, device=device)
-        for step in range(n_steps):
-            frac = (step + 1) / n_steps
-            target = int(frac * seq_len)
-            logits = model(tokens)
-            probs  = F.softmax(logits, dim=-1)
-            predicted = torch.multinomial(probs.view(seq_len, -1), 1).view(1, seq_len)
-            confidence, _ = probs.max(dim=-1)
-            still_masked = (tokens == self.mask_id)
-            confidence[~still_masked] = -1.0
-            already = (~still_masked).sum().item()
-            to_unmask = max(0, target - already)
-            if to_unmask > 0 and still_masked.any():
-                _, idx = confidence.view(-1).topk(min(to_unmask, still_masked.sum().item()))
-                flat = tokens.view(-1)
-                flat[idx] = predicted.view(-1)[idx]
-                tokens = flat.view(1, seq_len)
-        model.train()
+    def generate(self, prompt_ids, max_new_tokens, temperature=1.0, top_k=0, device='cpu'):
+        self.eval()
+        tokens = prompt_ids.clone()
+        for _ in range(max_new_tokens):
+            tokens_cropped = tokens[:, -128:]
+            logits = self(tokens_cropped)[:, -1, :] / temperature
+            if top_k > 0:
+                k = min(top_k, logits.size(-1))
+                threshold, _ = logits.topk(k, dim=-1)
+                logits = logits.masked_fill(logits < threshold[:, -1:], float('-inf'))
+            probs = F.softmax(logits, dim=-1)
+            next_token = torch.multinomial(probs, 1)
+            tokens = torch.cat([tokens, next_token], dim=1)
+        self.train()
         return tokens
 
 
 # ── Data loader ───────────────────────────────────────────────────────────────
 def get_batch(data, seq_len, batch_size, device):
-    ix = torch.randint(len(data) - seq_len, (batch_size,))
-    x  = torch.stack([data[i:i+seq_len] for i in ix])
-    return x.to(device)
+    ix = torch.randint(len(data) - seq_len - 1, (batch_size,))
+    x  = torch.stack([data[i:i + seq_len] for i in ix])
+    y  = torch.stack([data[i + 1:i + seq_len + 1] for i in ix])
+    return x.to(device), y.to(device)
 
 
 # ── Training ──────────────────────────────────────────────────────────────────
 def train():
-    # config
-    HIDDEN    = 384
-    N_LAYERS  = 6
-    N_HEADS   = 6
-    SEQ_LEN   = 128
-    BATCH     = 32
-    LR        = 3e-4
-    STEPS     = 50000
-    EVAL_INT  = 100
-    SAVE_INT  = 1000
-    WARMUP    = 400
+    HIDDEN   = 384
+    N_LAYERS = 6
+    N_HEADS  = 6
+    SEQ_LEN  = 128
+    BATCH    = 32
+    LR       = 3e-4
+    STEPS    = 50000
+    EVAL_INT = 100
+    SAVE_INT = 1000
+    WARMUP   = 400
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
 
-    # data
     text      = download_data()
     tokenizer = CharTokenizer(text)
     data      = torch.tensor(tokenizer.encode(text), dtype=torch.long)
     split     = int(0.9 * len(data))
     train_data, val_data = data[:split], data[split:]
 
-    print(f"Vocab size:  {tokenizer.vocab_size}")
+    print(f"Vocab size:   {tokenizer.vocab_size}")
     print(f"Train tokens: {len(train_data):,}")
 
     os.makedirs("checkpoints", exist_ok=True)
     tokenizer.save("checkpoints/vocab.json")
 
-    # model
-    model     = TinyDLLM(tokenizer.vocab_size, HIDDEN, N_LAYERS, N_HEADS, SEQ_LEN).to(device)
-    diffusion = MaskedDiffusion(model.mask_token_id)
+    model     = TinyGPT(tokenizer.vocab_size, HIDDEN, N_LAYERS, N_HEADS, SEQ_LEN).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=0.1)
 
     # resume from latest checkpoint if available
-    ckpts = sorted(glob.glob('checkpoints/dllm_step*.pt'), key=lambda p: int(p.split('step')[1].split('.')[0]))
+    ckpts = sorted(glob.glob('checkpoints/gpt_step*.pt'), key=lambda p: int(p.split('step')[1].split('.')[0]))
     start_step = 0
     if ckpts:
         ckpt = torch.load(ckpts[-1], map_location=device, weights_only=True)
@@ -212,9 +189,8 @@ def train():
         print(f"Resuming from step {start_step}")
 
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"Parameters: {total_params:,}")
+    print(f"Parameters:   {total_params:,}")
 
-    # linear warmup + cosine decay schedule
     def lr_schedule(step):
         if step < WARMUP:
             return step / WARMUP
@@ -227,8 +203,9 @@ def train():
     t0 = time.time()
 
     for step in range(start_step + 1, STEPS + 1):
-        batch = get_batch(train_data, SEQ_LEN, BATCH, device)
-        loss  = diffusion.loss(model, batch)
+        x, y = get_batch(train_data, SEQ_LEN, BATCH, device)
+        logits = model(x)
+        loss = F.cross_entropy(logits.view(-1, tokenizer.vocab_size), y.view(-1))
 
         optimizer.zero_grad()
         loss.backward()
@@ -237,20 +214,19 @@ def train():
         scheduler.step()
 
         if step % EVAL_INT == 0:
-            # val loss
             with torch.no_grad():
-                val_batch = get_batch(val_data, SEQ_LEN, BATCH, device)
-                val_loss  = diffusion.loss(model, val_batch)
+                xv, yv = get_batch(val_data, SEQ_LEN, BATCH, device)
+                val_loss = F.cross_entropy(model(xv).view(-1, tokenizer.vocab_size), yv.view(-1))
 
             elapsed = time.time() - t0
             lr_now  = scheduler.get_last_lr()[0] * LR
             print(f"step {step:5d} | train {loss.item():.4f} | val {val_loss.item():.4f} "
                   f"| lr {lr_now:.2e} | {elapsed:.0f}s")
 
-            # sample
-            ids  = diffusion.sample(model, seq_len=80, n_steps=20, device=device)
-            text_out = tokenizer.decode(ids[0].tolist())
-            print(f"  sample: {repr(text_out[:80])}")
+            # sample — seed with newline so it starts like a new speech
+            seed = torch.tensor([[tokenizer.c2i['\n']]], dtype=torch.long, device=device)
+            ids  = model.generate(seed, max_new_tokens=80, temperature=0.8, top_k=5, device=device)
+            print(f"  sample: {repr(tokenizer.decode(ids[0].tolist()[1:81]))}")
             t0 = time.time()
 
         if step % SAVE_INT == 0:
@@ -261,8 +237,8 @@ def train():
                 'vocab_size': tokenizer.vocab_size,
                 'hidden': HIDDEN, 'n_layers': N_LAYERS,
                 'n_heads': N_HEADS, 'seq_len': SEQ_LEN,
-            }, f"checkpoints/dllm_step{step}.pt")
-            print(f"  ✅ Saved checkpoint at step {step}")
+            }, f"checkpoints/gpt_step{step}.pt")
+            print(f"  Saved checkpoint at step {step}")
 
 
 if __name__ == '__main__':

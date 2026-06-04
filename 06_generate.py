@@ -55,7 +55,7 @@ class TinyDLLM(nn.Module):
         self.blocks    = nn.Sequential(*[TransformerBlock(hidden, n_heads) for _ in range(n_layers)])
         self.norm = nn.LayerNorm(hidden)
         self.head = nn.Linear(hidden, vocab_size, bias=False)
-        self.head.weight = self.token_emb.weight[:vocab_size]
+        self.head.weight = nn.Parameter(self.token_emb.weight[:vocab_size])
     def forward(self, token_ids):
         B, T = token_ids.shape
         pos = torch.arange(T, device=token_ids.device)
@@ -65,10 +65,11 @@ class TinyDLLM(nn.Module):
 
 # ── Sampling ──────────────────────────────────────────────────────────────────
 @torch.no_grad()
-def sample(model, seq_len, n_steps, temperature=1.0, device='cpu'):
+def sample(model, seq_len, n_steps, temperature=1.0, top_k=0, device='cpu'):
     """
     temperature > 1 → more random/creative
     temperature < 1 → more conservative/repetitive
+    top_k > 0      → restrict sampling to top-k tokens per position
     """
     mask_id = model.mask_token_id
     tokens  = torch.full((1, seq_len), mask_id, dtype=torch.long, device=device)
@@ -79,6 +80,11 @@ def sample(model, seq_len, n_steps, temperature=1.0, device='cpu'):
         target = int(frac * seq_len)
 
         logits = model(tokens) / temperature
+        if top_k > 0:
+            vocab_size = logits.size(-1)
+            k = min(top_k, vocab_size)
+            threshold, _ = logits.topk(k, dim=-1)
+            logits = logits.masked_fill(logits < threshold[..., -1:], float('-inf'))
         probs  = F.softmax(logits, dim=-1)
         predicted = torch.multinomial(probs.view(seq_len, -1), 1).view(1, seq_len)
         confidence, _ = probs.max(dim=-1)
@@ -109,19 +115,20 @@ def main():
     n_steps = int(args[args.index('--steps') + 1]) if '--steps' in args else 20
     seq_len = int(args[args.index('--len')   + 1]) if '--len'   in args else 128
     temp    = float(args[args.index('--temp')+ 1]) if '--temp'  in args else 1.0
+    top_k   = int(args[args.index('--topk')  + 1]) if '--topk'  in args else 0
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     # find latest checkpoint
     import os, glob
-    ckpts = sorted(glob.glob('checkpoints/dllm_step*.pt'))
+    ckpts = sorted(glob.glob('checkpoints/dllm_step*.pt'), key=lambda p: int(p.split('step')[1].split('.')[0]))
     if not ckpts:
         print("No checkpoint found. Run 05_train.py first.")
         return
     ckpt_path = ckpts[-1]
     print(f"Loading {ckpt_path}")
 
-    ckpt = torch.load(ckpt_path, map_location=device)
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=True)
     vocab = json.load(open('checkpoints/vocab.json'))
     i2c  = {int(v): k for k, v in vocab.items()}
 
@@ -133,7 +140,12 @@ def main():
     model.eval()
     print(f"Loaded checkpoint from step {ckpt['step']}")
 
-    tokens = sample(model, seq_len, n_steps, temp, device)
+    max_len = ckpt['seq_len']
+    if seq_len > max_len:
+        print(f"Warning: --len {seq_len} exceeds trained seq_len {max_len}, clamping.")
+        seq_len = max_len
+
+    tokens = sample(model, seq_len, n_steps, temp, top_k, device)
     text   = ''.join(i2c.get(i, '?') for i in tokens[0].tolist())
 
     print("\n" + "─" * 60)

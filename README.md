@@ -15,6 +15,17 @@ non-sequential generation.
  The   the quick fox jumps       ← step 10 (done)
 ```
 
+## Output Progression
+
+Same model, same checkpoint (step 20k) — showing the effect of sampling improvements:
+
+| Config | Sample output |
+|---|---|
+| Step 9k, 20 steps | `puliou ghep likl spseto feerr` |
+| Step 20k, 20 steps | `ornesnhawd never hod loym-lies First` |
+| Step 20k, 50 steps | `but to the... 'Tis make gate` |
+| Step 20k, 50 steps, top-k=5 | `yourself poor lord: your heart to loss` |
+
 ## Files
 
 ### Core (learn step by step)
@@ -25,8 +36,9 @@ non-sequential generation.
 | `02_attention.py` | Multi-head self-attention from scratch |
 | `03_transformer.py` | Full transformer backbone (~10M params) |
 | `04_diffusion.py` | Masked diffusion — forward noise + denoising sampler |
-| `05_train.py` | Train on TinyShakespeare |
-| `06_generate.py` | Generate text from a trained checkpoint |
+| `05_train.py` | Train dLLM on TinyShakespeare (resumes from checkpoint) |
+| `06_generate.py` | Generate text — supports `--steps`, `--temp`, `--topk` flags |
+| `07_train_gpt.py` | Train a GPT baseline — same size, same data, for comparison |
 
 ### Tamil (classical language experiment)
 
@@ -59,7 +71,10 @@ python 05_train.py
 
 # Generate English — no input needed, model generates on its own
 python 06_generate.py
-python 06_generate.py --steps 30 --len 200 --temp 0.8
+python 06_generate.py --steps 50 --temp 0.8 --topk 5
+
+# Train GPT baseline for comparison (same size, same data, 50k steps)
+python 07_train_gpt.py
 ```
 
 ### Tamil
@@ -104,6 +119,17 @@ Logits [B, T, vocab_size]
 
 ~10M parameters. Trains on TinyShakespeare (~1MB). Loss drops from ~4.2 → ~1.4 over 5000 steps.
 
+## dLLM vs GPT
+
+| | dLLM | GPT |
+|---|---|---|
+| Attention | Bidirectional (sees all tokens) | Causal (sees past only) |
+| Training target | Predict masked tokens | Predict next token |
+| Generation | Iterative denoising (parallel) | Left-to-right (sequential) |
+| Strengths | Fill-in-the-blank, planning | Fluent continuation |
+
+Both trained from scratch on TinyShakespeare with identical model size and steps.
+
 ## Roadmap
 
 - [x] Character-level tokenizer
@@ -113,7 +139,8 @@ Logits [B, T, vocab_size]
 - [x] Tamil Unicode tokenizer
 - [x] Train on Thirukkural + Sangam poetry
 - [x] Tamil Wikipedia downloader (API + full dump)
+- [ ] Train to 50k steps
+- [ ] GPT baseline comparison (dLLM vs GPT on same data)
+- [ ] Blog post: dLLM vs GPT on TinyShakespeare
 - [ ] Fill-in-the-blanks (conditional generation)
-- [ ] AI4Bharat Tamil dataset integration
-- [ ] Fine-tune on robot task sequences (ROS2 action plans)
-- [ ] Tamil robot commands → action plan generation
+- [ ] Robot path smoothing with dLLM (ROS2 + Nav2)
