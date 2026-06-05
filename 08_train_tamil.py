@@ -100,7 +100,7 @@ class TinyDLLM(nn.Module):
         self.blocks    = nn.Sequential(*[TransformerBlock(hidden, n_heads) for _ in range(n_layers)])
         self.norm = nn.LayerNorm(hidden)
         self.head = nn.Linear(hidden, vocab_size, bias=False)
-        self.head.weight = self.token_emb.weight[:vocab_size]
+        self.head.weight = nn.Parameter(self.token_emb.weight[:vocab_size])
         for m in self.modules():
             if isinstance(m, (nn.Linear, nn.Embedding)):
                 nn.init.normal_(m.weight, std=0.02)

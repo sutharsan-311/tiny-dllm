@@ -51,7 +51,7 @@ class TinyDLLM(nn.Module):
         self.blocks    = nn.Sequential(*[TransformerBlock(hidden, n_heads) for _ in range(n_layers)])
         self.norm = nn.LayerNorm(hidden)
         self.head = nn.Linear(hidden, vocab_size, bias=False)
-        self.head.weight = self.token_emb.weight[:vocab_size]
+        self.head.weight = nn.Parameter(self.token_emb.weight[:vocab_size])
     def forward(self, token_ids):
         B, T = token_ids.shape
         pos = torch.arange(T, device=token_ids.device)

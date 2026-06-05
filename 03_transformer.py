@@ -88,7 +88,7 @@ class TinyDLLM(nn.Module):
 
         # weight tying: share token embedding and output projection weights
         # (common trick — saves params, improves quality)
-        self.head.weight = self.token_emb.weight
+        self.head.weight = nn.Parameter(self.token_emb.weight)
 
         self._init_weights()
 

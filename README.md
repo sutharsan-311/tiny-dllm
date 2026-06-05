@@ -130,6 +130,17 @@ Logits [B, T, vocab_size]
 
 Both trained from scratch on TinyShakespeare with identical model size and steps.
 
+## Trained Checkpoint
+
+A checkpoint trained to 50,000 steps on TinyShakespeare is available on HuggingFace:
+
+```bash
+from huggingface_hub import hf_hub_download
+path = hf_hub_download(repo_id="sutharsan311/tiny-dllm", filename="dllm_step50000.pt")
+```
+
+Hardware: NVIDIA RTX 3050 (4GB VRAM) — ~2 hours training time.
+
 ## Roadmap
 
 - [x] Character-level tokenizer
@@ -139,7 +150,7 @@ Both trained from scratch on TinyShakespeare with identical model size and steps
 - [x] Tamil Unicode tokenizer
 - [x] Train on Thirukkural + Sangam poetry
 - [x] Tamil Wikipedia downloader (API + full dump)
-- [ ] Train to 50k steps
+- [x] Train to 50k steps
 - [ ] GPT baseline comparison (dLLM vs GPT on same data)
 - [ ] Blog post: dLLM vs GPT on TinyShakespeare
 - [ ] Fill-in-the-blanks (conditional generation)
