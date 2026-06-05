@@ -163,9 +163,9 @@ Hardware: NVIDIA RTX 3050 (4GB VRAM) — ~2 hours training time.
 - [x] Transformer backbone
 - [x] Masked diffusion training
 - [x] Iterative confidence-based sampling
-- [x] Tamil Unicode tokenizer
-- [x] Train on Thirukkural + Sangam poetry
-- [x] Tamil Wikipedia downloader (API + full dump)
+- [ ] Tamil Unicode tokenizer
+- [ ] Train on Thirukkural + Sangam poetry
+- [ ] Tamil Wikipedia downloader (API + full dump)
 - [x] Train to 50k steps
 - [ ] GPT baseline comparison (dLLM vs GPT on same data)
 - [ ] Blog post: dLLM vs GPT on TinyShakespeare
