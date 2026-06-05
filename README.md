@@ -1,6 +1,22 @@
+---
+language:
+- en
+license: mit
+tags:
+- diffusion
+- language-model
+- pytorch
+- shakespeare
+- nlp
+- from-scratch
+library_name: pytorch
+---
+
 # tiny-dllm
 
 A Masked Diffusion Language Model built from scratch in PyTorch — for learning and robotics research.
+
+![output sample](output_sample.jpg)
 
 ## What is a Diffusion Language Model?
 
