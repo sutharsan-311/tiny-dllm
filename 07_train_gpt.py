@@ -241,5 +241,54 @@ def train():
             print(f"  Saved checkpoint at step {step}")
 
 
+def generate_from_checkpoint(prompt="", max_new_tokens=200, temperature=0.8, top_k=5):
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"Device: {device}")
+
+    ckpts = sorted(glob.glob('checkpoints/gpt_step*.pt'), key=lambda p: int(p.split('step')[1].split('.')[0]))
+    if not ckpts:
+        print("No checkpoints found in checkpoints/. Train first.")
+        return
+    ckpt_path = ckpts[-1]
+    print(f"Loading {ckpt_path}")
+
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=True)
+    tokenizer = CharTokenizer.load("checkpoints/vocab.json")
+
+    hidden   = ckpt.get('hidden',   384)
+    n_layers = ckpt.get('n_layers', 6)
+    n_heads  = ckpt.get('n_heads',  6)
+    seq_len  = ckpt.get('seq_len',  128)
+
+    model = TinyGPT(tokenizer.vocab_size, hidden, n_layers, n_heads, seq_len).to(device)
+    model.load_state_dict(ckpt['model'])
+    model.eval()
+
+    if prompt:
+        seed_ids = tokenizer.encode(prompt)
+    else:
+        seed_ids = [tokenizer.c2i['\n']]
+
+    seed = torch.tensor([seed_ids], dtype=torch.long, device=device)
+    ids  = model.generate(seed, max_new_tokens=max_new_tokens,
+                          temperature=temperature, top_k=top_k, device=device)
+    text = tokenizer.decode(ids[0].tolist())
+    print("\n" + "─" * 60)
+    print(text)
+    print("─" * 60)
+
+
 if __name__ == '__main__':
-    train()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--generate', action='store_true', help='Generate text from the latest checkpoint')
+    parser.add_argument('--prompt', type=str, default='', help='Seed text for generation')
+    parser.add_argument('--tokens', type=int, default=200, help='Number of tokens to generate')
+    parser.add_argument('--temperature', type=float, default=0.8)
+    parser.add_argument('--top_k', type=int, default=5)
+    args = parser.parse_args()
+
+    if args.generate:
+        generate_from_checkpoint(args.prompt, args.tokens, args.temperature, args.top_k)
+    else:
+        train()
