@@ -16,7 +16,7 @@ library_name: pytorch
 
 A Masked Diffusion Language Model built from scratch in PyTorch — for learning and robotics research.
 
-![output sample](output_sample.jpg)
+![iterative denoising](demo_denoising.gif)
 
 ## What is a Diffusion Language Model?
 
@@ -26,21 +26,24 @@ tokens in parallel based on confidence. This enables bidirectional context and
 non-sequential generation.
 
 ```
-[MASK][MASK][MASK][MASK][MASK]   ← start (fully masked, no input needed)
-[MASK] the [MASK] fox [MASK]     ← step 3
- The   the quick fox jumps       ← step 10 (done)
+_ _ _ _ _ _ _ _ _ _ _ _   ← start (all masked)
+_ the _ fox _ jumps _      ← step 10
+The quick fox jumps over   ← step 30 (done)
 ```
 
-## Output Progression
+## Training Progress
 
-Same model, same checkpoint (step 20k) — showing the effect of sampling improvements:
+![training loss and output quality](linkedin_loss_curve.png)
+
+Loss drops from **4.2 → 1.4** over 50,000 steps. Early outputs are gibberish; by step 50k with top-k sampling the model generates coherent Shakespeare-style text.
+
+## Output Progression
 
 | Config | Sample output |
 |---|---|
 | Step 9k, 20 steps | `puliou ghep likl spseto feerr` |
-| Step 20k, 20 steps | `ornesnhawd never hod loym-lies First` |
 | Step 20k, 50 steps | `but to the... 'Tis make gate` |
-| Step 20k, 50 steps, top-k=5 | `yourself poor lord: your heart to loss` |
+| Step 50k, 100 steps, top-k=3 | `nst thou little, sand of death. GLLUCESTER: Where, and they have the gut thee if this` |
 
 ## Files
 
