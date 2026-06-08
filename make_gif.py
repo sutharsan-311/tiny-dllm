@@ -102,18 +102,25 @@ def sample_with_frames(model, seq_len, n_steps, temperature=0.8, top_k=5, device
 
 
 # ── Frame rendering ───────────────────────────────────────────────────────────
-W, H = 720, 200
-BG      = (10, 10, 10)
-MASK_C  = (100, 90, 180)   # purple — still masked
-REVEAL_C= (81, 207, 102)   # green  — just revealed
-DONE_C  = (200, 200, 200)  # white  — already done
-TITLE_C = (170, 170, 170)
-DIM_C   = (80, 80, 80)
+W, H    = 700, 260
+BG      = (13, 13, 13)
+MASK_C  = (60, 55, 100)    # dim purple — masked placeholder
+REVEAL_C= (81, 207, 102)   # bright green — just revealed
+DONE_C  = (204, 204, 204)  # light grey — settled
+TITLE_C = (150, 150, 150)
+BAR_C   = (80, 70, 180)
+DIM_C   = (65, 65, 65)
+
+FONT_PATHS = [
+    '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf',
+    '/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf',
+    '/usr/share/fonts/truetype/freefont/FreeMono.ttf',
+]
 
 def try_font(size):
-    for name in ['DejaVuSansMono', 'Courier', 'monospace', 'FreeMono']:
+    for p in FONT_PATHS:
         try:
-            return ImageFont.truetype(f'/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf', size)
+            return ImageFont.truetype(p, size)
         except Exception:
             pass
     return ImageFont.load_default()
@@ -122,58 +129,65 @@ def render_frame(step, n_steps, tokens_t, mask_t, prev_mask_t, i2c, seq_len):
     img  = Image.new('RGB', (W, H), BG)
     draw = ImageDraw.Draw(img)
 
-    font_sm = try_font(11)
-    font_md = try_font(14)
+    f_title = try_font(13)
+    f_text  = try_font(16)
+    f_small = try_font(11)
 
-    # Title
-    draw.text((W//2, 14), 'tiny-dllm  ·  iterative denoising',
-              fill=TITLE_C, font=font_sm, anchor='mm')
+    # measure actual char width from font so spacing is exact
+    bbox = f_text.getbbox('A')
+    cw   = bbox[2] - bbox[0]   # character width
+    ch   = bbox[3] - bbox[1] + 4  # character height + line gap
 
-    # Step indicator
+    # ── header ───────────────────────────────────────────────────────────────
+    draw.text((W // 2, 16), 'tiny-dllm  ·  iterative denoising',
+              fill=TITLE_C, font=f_title, anchor='mm')
+
+    # progress bar
+    bar_x1, bar_x2, bar_y = 30, W - 30, 30
+    draw.rectangle([bar_x1, bar_y, bar_x2, bar_y + 6], fill=(28, 28, 28))
+    filled = bar_x1 + int((bar_x2 - bar_x1) * step / n_steps)
+    draw.rectangle([bar_x1, bar_y, filled, bar_y + 6], fill=BAR_C)
+
     pct = int(step / n_steps * 100)
-    bar_w = int((W - 80) * step / n_steps)
-    draw.rectangle([40, 30, W-40, 38], fill=(30, 30, 30))
-    draw.rectangle([40, 30, 40 + bar_w, 38], fill=(100, 90, 180))
-    draw.text((W//2, 50), f'step {step}/{n_steps}  ({pct}% unmasked)',
-              fill=DIM_C, font=font_sm, anchor='mm')
+    draw.text((W // 2, 46), f'step {step} / {n_steps}   —   {pct}% revealed',
+              fill=DIM_C, font=f_small, anchor='mm')
 
-    # Render tokens in a grid
-    chars_per_row = 40
-    char_w, char_h = 14, 22
-    x0 = (W - chars_per_row * char_w) // 2
-    y0 = 65
+    # ── text grid ────────────────────────────────────────────────────────────
+    max_cols = (W - 60) // cw
+    x0 = (W - max_cols * cw) // 2
+    y0 = 62
 
     newly_revealed = prev_mask_t & ~mask_t
 
-    for i in range(min(seq_len, chars_per_row * 3)):
-        row = i // chars_per_row
-        col = i % chars_per_row
-        x = x0 + col * char_w
-        y = y0 + row * char_h
+    for i in range(min(seq_len, max_cols * 4)):
+        row = i // max_cols
+        col = i % max_cols
+        x   = x0 + col * cw
+        y   = y0 + row * ch
 
-        tok = tokens_t[0, i].item()
-        is_masked = mask_t[0, i].item()
-        is_new    = newly_revealed[0, i].item()
+        tok        = tokens_t[0, i].item()
+        is_masked  = mask_t[0, i].item()
+        is_new     = newly_revealed[0, i].item()
 
         if is_masked:
-            ch    = '▒'
-            color = MASK_C
+            ch_str = '_'
+            color  = MASK_C
         elif is_new:
-            ch    = i2c.get(tok, '?')
-            color = REVEAL_C
+            ch_str = i2c.get(tok, '?')
+            color  = REVEAL_C
         else:
-            ch    = i2c.get(tok, '?')
-            color = DONE_C
+            ch_str = i2c.get(tok, '?')
+            color  = DONE_C
 
-        draw.text((x, y), ch, fill=color, font=font_md)
+        draw.text((x, y), ch_str, fill=color, font=f_text)
 
-    # Legend
-    lx = 20
-    ly = H - 22
-    for label, col in [('masked', MASK_C), ('just revealed', REVEAL_C), ('settled', DONE_C)]:
-        draw.rectangle([lx, ly+4, lx+10, ly+14], fill=col)
-        draw.text((lx+14, ly), label, fill=DIM_C, font=font_sm)
-        lx += 110
+    # ── legend ────────────────────────────────────────────────────────────────
+    ly = H - 18
+    items = [('_  masked', MASK_C), ('█  just revealed', REVEAL_C), ('█  settled', DONE_C)]
+    lx = 24
+    for label, col in items:
+        draw.text((lx, ly), label, fill=col, font=f_small)
+        lx += 160
 
     return img
 
@@ -216,8 +230,13 @@ def main():
         imgs.append(img)
         prev_mask = mask_t
 
+    # Print final output text (copy this into make_loss_curve.py)
+    last_tokens, last_mask = frames_data[-1][1], frames_data[-1][2]
+    final_text = ''.join(i2c.get(last_tokens[0, i].item(), '?') for i in range(seq_len))
+    print(f"\nFinal output:\n{final_text}\n")
+
     # Hold last frame longer
-    imgs += [imgs[-1]] * 8
+    imgs += [imgs[-1]] * 12
 
     out = 'demo_denoising.gif'
     imgs[0].save(out, save_all=True, append_images=imgs[1:],
