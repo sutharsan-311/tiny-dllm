@@ -96,7 +96,7 @@ def sample_with_frames(model, seq_len, n_steps, temperature=0.8, top_k=5, device
             flat[idx] = predicted.view(-1)[idx]
             tokens = flat.view(1, seq_len)
 
-        frames.append((step + 1, tokens.clone(), still_masked.clone()))
+        frames.append((step + 1, tokens.cpu().clone(), still_masked.cpu().clone()))
 
     return frames
 
